@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -570,21 +571,30 @@ func (h *handlers) GetGrades(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
+	// 履修している科目一覧で取得した course_id リストを作成する。
+	courseIDs := make([]string, 0, len(registeredCourses))
+	for _, p := range registeredCourses {
+		courseIDs = append(courseIDs, p.ID)
+	}
+
+	// クラス一覧を IN で取得する。
+	classes := h.preloadClasses(courseIDs)
+
 	// 科目毎の成績計算処理
 	courseResults := make([]CourseResult, 0, len(registeredCourses))
 	myGPA := 0.0
 	myCredits := 0
 	for _, course := range registeredCourses {
 		// 講義一覧の取得
-		var classes []Class
-		query = "SELECT *" +
-			" FROM `classes`" +
-			" WHERE `course_id` = ?" +
-			" ORDER BY `part` DESC"
-		if err := h.DB.Select(&classes, query, course.ID); err != nil {
-			c.Logger().Error(err)
-			return c.NoContent(http.StatusInternalServerError)
-		}
+		// var classes []Class
+		// query = "SELECT *" +
+		// 	" FROM `classes`" +
+		// 	" WHERE `course_id` = ?" +
+		// 	" ORDER BY `part` DESC"
+		// if err := h.DB.Select(&classes, query, course.ID); err != nil {
+		// 	c.Logger().Error(err)
+		// 	return c.NoContent(http.StatusInternalServerError)
+		// }
 
 		// 講義毎の成績計算処理
 		classScores := make([]ClassScore, 0, len(classes))
@@ -693,6 +703,36 @@ func (h *handlers) GetGrades(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, res)
+}
+
+func (h *handlers) preloadClasses(ids []string) []Class {
+	classes := []Class{}
+	if len(ids) == 0 {
+		return classes
+	}
+
+	params := make([]interface{}, 0, len(ids))
+	placeholders := make([]string, 0, len(ids))
+	for _, id := range ids {
+		params = append(params, id)
+		placeholders = append(placeholders, "?")
+	}
+
+	cl := []Class{}
+	err := h.DB.Select(
+		&cl,
+		"SELECT *"+
+			" FROM `classes`"+
+			" WHERE `course_id` IN ("+strings.Join(placeholders, ",")+")"+
+			" ORDER BY `part` DESC",
+		params...,
+	)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return cl
 }
 
 // ---------- Courses API ----------
